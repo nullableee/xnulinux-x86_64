@@ -1156,7 +1156,7 @@ static int __init fki_x86_init(void)
 	/* The file is append-only, so tag each run with the build that wrote it. */
 	{
 		const char *mark =
-		    "fki-x86: BUILD live-stage in phase line, logger-synced\n";
+		    "fki-x86: BUILD v2 tag/ring phase trace\n";
 
 		fki_debug_log(mark, strlen(mark));
 		/* Make the freshly created file survive an emergency reboot. */

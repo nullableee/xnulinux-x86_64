@@ -13,7 +13,7 @@
 #ifndef _LINUX_FKI_X86_H
 #define _LINUX_FKI_X86_H
 
-#define FKI_X86_VERSION 1
+#define FKI_X86_VERSION 2
 
 #ifndef __KERNEL__
 #include <stdint.h>
