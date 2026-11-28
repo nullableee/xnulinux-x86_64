@@ -511,12 +511,25 @@ static const char *fki_phase_name(unsigned long p)
 	}
 }
 
-static void fki_trace_drain(void);
+static unsigned int fki_trace_drain(void);
+
+/*
+ * An emergency reboot loses page-cache-only writes, which made a freshly
+ * created xnu-boot.log look empty. Only the logger thread calls this, in
+ * ordinary context on a different CPU; the upcall hook never syncs.
+ */
+static void fki_debug_sync(void)
+{
+	mutex_lock(&fki_debug_lock);
+	if (fki_debug_file)
+		vfs_fsync(fki_debug_file, 0);
+	mutex_unlock(&fki_debug_lock);
+}
 
 static int fki_phase_logger(void *unused)
 {
 	unsigned long last = READ_ONCE(fki_x86_phase);
-	unsigned int tick = 0;
+	unsigned int tick = 0, sync_tick = 0;
 
 	while (!fki_thread_should_stop()) {
 		unsigned long p = READ_ONCE(fki_x86_phase);
@@ -540,7 +553,14 @@ static int fki_phase_logger(void *unused)
 			tick = 0;
 		}
 		/* Drain hook lines from this CPU, never from the upcall CPU. */
-		fki_trace_drain();
+		if (fki_trace_drain())
+			fki_debug_sync();
+		/* Phase lines also need flushing: a hard reset after a wedged
+		 * run must leave the last known state on disk. */
+		if (++sync_tick >= 20) {
+			fki_debug_sync();
+			sync_tick = 0;
+		}
 		fki_msleep(5);
 	}
 	return 0;
@@ -600,9 +620,10 @@ void fki_trace_push(const char *s, unsigned long len)
 }
 EXPORT_SYMBOL(fki_trace_push);
 
-static void fki_trace_drain(void)
+static unsigned int fki_trace_drain(void)
 {
 	unsigned int end = (unsigned int)atomic_read(&fki_trace_seq);
+	unsigned int n = 0;
 
 	while (fki_trace_drained < end) {
 		unsigned int slot = fki_trace_drained & (FKI_TRACE_SLOTS - 1);
@@ -613,7 +634,9 @@ static void fki_trace_drain(void)
 		    fki_trace_lens[slot]);
 		WRITE_ONCE(fki_trace_ready[slot], 0);
 		fki_trace_drained++;
+		n++;
 	}
+	return n;
 }
 
 int fki_debug_log(const char *s, unsigned long len)
@@ -1115,9 +1138,12 @@ static int __init fki_x86_init(void)
 	fki_debug_init();
 	/* The file is append-only, so tag each run with the build that wrote it. */
 	{
-		const char *mark = "fki-x86: BUILD live-stage in phase line\n";
+		const char *mark =
+		    "fki-x86: BUILD live-stage in phase line, logger-synced\n";
 
 		fki_debug_log(mark, strlen(mark));
+		/* Make the freshly created file survive an emergency reboot. */
+		fki_debug_sync();
 	}
 	proc_create("fki_x86_live", 0444, NULL, &fki_live_ops);
 	/*
