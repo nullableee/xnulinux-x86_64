@@ -453,6 +453,7 @@ EXPORT_SYMBOL(fki_x86_hook_stage);
  * rate-limited, so a stable phase can be told apart from a long XNU run. */
 extern unsigned long xnu_upcall_count;
 extern unsigned long xnu_upcall_last;
+extern unsigned long xnu_upcall_tag;
 
 void fki_x86_phase_set(unsigned long phase, unsigned long arg)
 {
@@ -512,6 +513,8 @@ static const char *fki_phase_name(unsigned long p)
 }
 
 static unsigned int fki_trace_drain(void);
+static unsigned int fki_trace_seq_snap(void);
+static unsigned int fki_trace_drained_snap(void);
 
 /*
  * An emergency reboot loses page-cache-only writes, which made a freshly
@@ -540,12 +543,15 @@ static int fki_phase_logger(void *unused)
 		if (p != last || ++tick >= 20) {
 			char buf[256];
 			int n = snprintf(buf, sizeof(buf),
-			    "phase: %lu %s arg=0x%lx pre=0x%lx upcalls=%lu last=0x%lx stage=%lu\n",
+			    "phase: %lu %s arg=0x%lx pre=0x%lx upcalls=%lu "
+			    "last=0x%lx tag=0x%lx stage=%lu ring=%u/%u\n",
 			    p, fki_phase_name(p), READ_ONCE(fki_x86_phase_arg),
 			    READ_ONCE(xnu_site3_hook_pre),
 			    READ_ONCE(xnu_upcall_count),
 			    READ_ONCE(xnu_upcall_last),
-			    READ_ONCE(fki_x86_hook_stage));
+			    READ_ONCE(xnu_upcall_tag),
+			    READ_ONCE(fki_x86_hook_stage),
+			    fki_trace_seq_snap(), fki_trace_drained_snap());
 
 			if (n > 0)
 				fki_debug_log(buf, min_t(int, n, sizeof(buf) - 1));
@@ -637,6 +643,16 @@ static unsigned int fki_trace_drain(void)
 		n++;
 	}
 	return n;
+}
+
+static unsigned int fki_trace_seq_snap(void)
+{
+	return (unsigned int)atomic_read(&fki_trace_seq);
+}
+
+static unsigned int fki_trace_drained_snap(void)
+{
+	return READ_ONCE(fki_trace_drained);
 }
 
 int fki_debug_log(const char *s, unsigned long len)
@@ -1106,10 +1122,11 @@ static int fki_live_show(struct seq_file *m, void *v)
 {
 	seq_printf(m,
 	    "phase=%lu phase_arg=0x%lx hook_stage=%lu "
-	    "upcalls=%lu last=0x%lx\n",
+	    "upcalls=%lu last=0x%lx tag=0x%lx ring=%u/%u\n",
 	    READ_ONCE(fki_x86_phase), READ_ONCE(fki_x86_phase_arg),
 	    READ_ONCE(fki_x86_hook_stage), READ_ONCE(xnu_upcall_count),
-	    READ_ONCE(xnu_upcall_last));
+	    READ_ONCE(xnu_upcall_last), READ_ONCE(xnu_upcall_tag),
+	    fki_trace_seq_snap(), fki_trace_drained_snap());
 	return 0;
 }
 

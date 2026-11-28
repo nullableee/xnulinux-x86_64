@@ -41,6 +41,8 @@ extern volatile unsigned long fki_x86_hook_stage;
 /* Seen by the phase logger even when KPRINTF lines are rate-limited. */
 unsigned long xnu_upcall_count;
 unsigned long xnu_upcall_last;
+/* Last SITE_TAG id, visible in the phase line even if the ring is stuck. */
+unsigned long xnu_upcall_tag;
 /* Set by the upcall trampoline: the XNU call site that made this upcall. */
 unsigned long xnu_upcall_ret;
 EXPORT_SYMBOL(xnu_upcall_ret);
@@ -97,6 +99,8 @@ long xnu_hook_x86(unsigned long call, unsigned long a1, unsigned long a2)
 
 	xnu_upcall_last = call;
 	xnu_upcall_count++;
+	if (site_tag)
+		xnu_upcall_tag = a1;
 	fki_x86_hook_stage = 1;
 
 	/*
